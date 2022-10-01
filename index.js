@@ -1,59 +1,120 @@
+const puppeteer = require("puppeteer");
 const express = require("express");
 const app = express();
-const port = process.env.PORT || 3001;
+let port = process.env.PORT || 3001;
+const cors = require("cors")
+app.use(
+  cors({
+    // origin:"https://ubcscheduler.herokuapp.com",
+    origin:"*",
+    optionsSuccessStatus: 200,
+    methods:["GET"],
+  })
+)
+app.listen(port, () => {
+  console.log(`This app is listening on port http://localhost:${port}`)
+})
 
-app.get("/", (req, res) => res.type('html').send(html));
-
-app.listen(port, () => console.log(`Example app listening on port ${port}!`));
 
 
-const html = `
-<!DOCTYPE html>
-<html>
-  <head>
-    <title>Hello from Render!</title>
-    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
-    <script>
-      setTimeout(() => {
-        confetti({
-          particleCount: 100,
-          spread: 70,
-          origin: { y: 0.6 },
-          disableForReducedMotion: true
-        });
-      }, 500);
-    </script>
-    <style>
-      @import url("https://p.typekit.net/p.css?s=1&k=vnd5zic&ht=tk&f=39475.39476.39477.39478.39479.39480.39481.39482&a=18673890&app=typekit&e=css");
-      @font-face {
-        font-family: "neo-sans";
-        src: url("https://use.typekit.net/af/00ac0a/00000000000000003b9b2033/27/l?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n7&v=3") format("woff2"), url("https://use.typekit.net/af/00ac0a/00000000000000003b9b2033/27/d?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n7&v=3") format("woff"), url("https://use.typekit.net/af/00ac0a/00000000000000003b9b2033/27/a?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n7&v=3") format("opentype");
-        font-style: normal;
-        font-weight: 700;
+app.get("/", async (req, res) => {
+  res.status(200).send("Welcome to UBC Scheduler's API")
+})
+
+
+
+/**
+ * collects subject and number to create appropriate
+ * url to send to the scraper. return the response in json format
+ */
+app.get("/api/sections", async (req, res) => {
+  // Directory: /api/sections?subject=CPSC&number=110'
+  const subject = req.query.subject
+  const number = req.query.number
+  
+  //Blocked:
+  // const url = `https://courses.students.ubc.ca/cs/courseschedule?pname=subjarea&tname=subj-course&dept=${subject}&course=${number}`
+  const url = `https://courses.students.ubc.ca/cs/courseschedule?tname=subj-course&course=${number}&sessyr=2022&sesscd=W&dept=${subject}&pname=subjarea`
+
+  const data = await scrapeData(url); //hold until response comes back
+  res.status(200).json({ sections: data })
+})
+
+
+/**
+ * scrapes section data from UBC course website.
+ * first finds the table containing the data, 
+ * .table.table-striped.section-summary
+ * then parse tr nested in the element.
+ * run loops to collect neccessary info.
+ * @param {string} url 
+ * @returns 
+ */
+const scrapeData = async (url) => {
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ["--no-sandbox"]
+  });
+  const page = await browser.newPage()
+  await page.setExtraHTTPHeaders({
+    'Accept-Language': 'en-US,en;q=0.9'
+  });
+  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.181 Safari/537.36');
+  await page.goto(url)
+
+  const data = await page.evaluate(() => {
+    let acc = [] // accumulates section
+    const trTags = document.querySelectorAll('.table.table-striped.section-summary tbody tr')
+    console.log(trTags)
+    const create_UUID = () => {
+      let dt = new Date().getTime();
+      let uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+          let r = (dt + Math.random()*16)%16 | 0;
+          dt = Math.floor(dt/16);
+          return (c=='x' ? r :(r&0x3|0x8)).toString(16);
+      });
+      return uuid;
+    }
+    trTags.forEach(tr => {
+      const tds = tr.children // all tds inside <tr> element
+
+      const id = create_UUID();
+      const status = tds[0].innerHTML === " " ? "Available" : tds[0].innerHTML
+      const name = tds[1].innerText
+      const [subject, course, section] = name.split(" ");
+      const activity = tds[2].innerHTML
+      const term = tds[3].innerHTML
+      const days = tds[6].innerHTML.trimStart()
+      const start_time = tds[7].innerHTML
+      const end_time = tds[8].innerHTML
+
+      const make_timeslot = (startTime, endTime, day, term) => {
+        let startArr = startTime.split(":").map((s) => parseInt(s));
+        let endArr = endTime.split(":").map((s) => parseInt(s));
+        let nstart = (startArr[0]*60)+startArr[1];
+        let nend = (endArr[0]*60)+endArr[1];
+        return {start_time: nstart, end_time: nend, day:day, term:term};
       }
-      html {
-        font-family: neo-sans;
-        font-weight: 700;
-        font-size: calc(62rem / 16);
+
+      
+      const schedule =  days.split(" ").map(d => (make_timeslot( start_time, end_time, d, term )))
+      const section_data = {
+        id: id,
+        status: status,
+        name: name,
+        subject: subject,
+        course: course,
+        section: section,
+        activity: activity,
+        term: term,
+        schedule: schedule
       }
-      body {
-        background: white;
-      }
-      section {
-        border-radius: 1em;
-        padding: 1em;
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        margin-right: -50%;
-        transform: translate(-50%, -50%);
-      }
-    </style>
-  </head>
-  <body>
-    <section>
-      Hello from Render!
-    </section>
-  </body>
-</html>
-`
+      acc.push(section_data)
+    })
+    return acc
+  })
+  await browser.close()
+  return data
+}
+
+
