@@ -65,7 +65,6 @@ const scrapeData = async (url) => {
   const data = await page.evaluate(() => {
     let acc = [] // accumulates section
     const trTags = document.querySelectorAll('.table.table-striped.section-summary tbody tr')
-    console.log(trTags)
     const create_UUID = () => {
       let dt = new Date().getTime();
       let uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -96,7 +95,6 @@ const scrapeData = async (url) => {
         return {start_time: nstart, end_time: nend, day:day, term:term};
       }
 
-      
       const schedule =  days.split(" ").map(d => (make_timeslot( start_time, end_time, d, term )))
       const section_data = {
         id: id,
