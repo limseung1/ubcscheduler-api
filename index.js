@@ -1,11 +1,12 @@
 const puppeteer = require("puppeteer");
 const express = require("express");
 const app = express();
+const path = require('path');
 let port = process.env.PORT || 3001;
 const cors = require("cors")
 app.use(
   cors({
-    // origin:"https://ubcscheduler.herokuapp.com",
+    // origin:"https://ubcscheduler....com",
     origin:"*",
     optionsSuccessStatus: 200,
     methods:["GET"],
@@ -15,12 +16,12 @@ app.listen(port, () => {
   console.log(`This app is listening on port http://localhost:${port}`)
 })
 
-
+/** Serve static files js and css */
+app.use(express.static(path.join(__dirname, 'build')));
 
 app.get("/", async (req, res) => {
-  res.status(200).send("Welcome to UBC Scheduler's API")
+  res.sendFile(path.join(__dirname, 'build', 'index.html'))
 })
-
 
 
 /**
@@ -35,10 +36,10 @@ app.get("/api/sections", async (req, res) => {
   //Blocked:
   // const url = `https://courses.students.ubc.ca/cs/courseschedule?pname=subjarea&tname=subj-course&dept=${subject}&course=${number}`
   const url = `https://courses.students.ubc.ca/cs/courseschedule?tname=subj-course&course=${number}&sessyr=2022&sesscd=W&dept=${subject}&pname=subjarea`
-
   const data = await scrapeData(url); //hold until response comes back
   res.status(200).json({ sections: data })
 })
+
 
 
 /**
@@ -63,8 +64,13 @@ const scrapeData = async (url) => {
   await page.goto(url)
 
   const data = await page.evaluate(() => {
-    let acc = [] // accumulates section
-    const trTags = document.querySelectorAll('.table.table-striped.section-summary tbody tr')
+    const make_timeslot = (startTime, endTime, day, term) => {
+      let startArr = startTime.split(":").map((s) => parseInt(s));
+      let endArr = endTime.split(":").map((s) => parseInt(s));
+      let nstart = (startArr[0]*60)+startArr[1];
+      let nend = (endArr[0]*60)+endArr[1];
+      return {start_time: nstart, end_time: nend, day:day, term:term};
+    }
     const create_UUID = () => {
       let dt = new Date().getTime();
       let uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -74,9 +80,11 @@ const scrapeData = async (url) => {
       });
       return uuid;
     }
+    let acc = [] // accumulates section
+    const trTags = document.querySelectorAll('.table.table-striped.section-summary tbody tr')
+
     trTags.forEach(tr => {
       const tds = tr.children // all tds inside <tr> element
-
       const id = create_UUID();
       const status = tds[0].innerHTML === " " ? "Available" : tds[0].innerHTML
       const name = tds[1].innerText
@@ -86,14 +94,6 @@ const scrapeData = async (url) => {
       const days = tds[6].innerHTML.trimStart()
       const start_time = tds[7].innerHTML
       const end_time = tds[8].innerHTML
-
-      const make_timeslot = (startTime, endTime, day, term) => {
-        let startArr = startTime.split(":").map((s) => parseInt(s));
-        let endArr = endTime.split(":").map((s) => parseInt(s));
-        let nstart = (startArr[0]*60)+startArr[1];
-        let nend = (endArr[0]*60)+endArr[1];
-        return {start_time: nstart, end_time: nend, day:day, term:term};
-      }
 
       const schedule =  days.split(" ").map(d => (make_timeslot( start_time, end_time, d, term )))
       const section_data = {
@@ -109,10 +109,13 @@ const scrapeData = async (url) => {
       }
       acc.push(section_data)
     })
+
     return acc
   })
+
   await browser.close()
-  return data
+  return data  
 }
+
 
 
